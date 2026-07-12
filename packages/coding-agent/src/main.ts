@@ -612,6 +612,10 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 	const authStorage = AuthStorage.create();
+	const extensionToggle = {
+		known: new Map<string, { path: string; resolvedPath: string }>(),
+		disabled: new Set<string>(),
+	};
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
@@ -674,6 +678,21 @@ export async function main(args: string[], options?: MainOptions) {
 				systemPrompt: parsed.systemPrompt,
 				appendSystemPrompt: parsed.appendSystemPrompt,
 				extensionFactories: options?.extensionFactories,
+				// ponytail: Result filtering cannot undo registerProvider calls made while extension factories execute.
+				extensionsOverride: (base) => {
+					extensionToggle.known = new Map(
+						base.extensions.map((extension) => [
+							extension.resolvedPath,
+							{ path: extension.path, resolvedPath: extension.resolvedPath },
+						]),
+					);
+					return {
+						...base,
+						extensions: base.extensions.filter(
+							(extension) => !extensionToggle.disabled.has(extension.resolvedPath),
+						),
+					};
+				},
 			},
 		});
 		const { settingsManager, modelRegistry, resourceLoader } = services;
@@ -820,6 +839,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialImages,
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
+			extensionToggle,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();

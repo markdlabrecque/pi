@@ -118,6 +118,7 @@ import { EarendilAnnouncementComponent } from "./components/earendil-announcemen
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
+import { ExtensionToggleSelectorComponent } from "./components/extension-toggle-selector.ts";
 import { FooterComponent, formatTokens } from "./components/footer.ts";
 import { formatKeyText, keyDisplayText, keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.ts";
 import { LoginDialogComponent } from "./components/login-dialog.ts";
@@ -320,6 +321,11 @@ function formatLoginProviderCompletionDescription(provider: LoginProviderComplet
 /**
  * Options for InteractiveMode initialization.
  */
+export interface ExtensionToggleState {
+	known: Map<string, { path: string; resolvedPath: string }>;
+	disabled: Set<string>;
+}
+
 export interface InteractiveModeOptions {
 	/** Providers that were migrated to auth.json (shows warning) */
 	migratedProviders?: string[];
@@ -335,6 +341,8 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
+	/** Process-scoped extension enablement state. */
+	extensionToggle?: ExtensionToggleState;
 }
 
 export class InteractiveMode {
@@ -2647,6 +2655,11 @@ export class InteractiveMode {
 				await this.showModelsSelector();
 				return;
 			}
+			if (text === "/extensions") {
+				this.editor.setText("");
+				this.showExtensionsSelector();
+				return;
+			}
 			if (text === "/model" || text.startsWith("/model ")) {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
@@ -4110,6 +4123,48 @@ export class InteractiveMode {
 		this.editorContainer.addChild(component);
 		this.ui.setFocus(focus);
 		this.ui.requestRender();
+	}
+
+	private showExtensionsSelector(): void {
+		if (this.session.isStreaming) {
+			this.showWarning("Wait for the current response to finish before reloading.");
+			return;
+		}
+		if (this.session.isCompacting) {
+			this.showWarning("Wait for compaction to finish before reloading.");
+			return;
+		}
+
+		const extensionToggle = this.options.extensionToggle;
+		if (!extensionToggle || extensionToggle.known.size === 0) {
+			this.showStatus("No extensions loaded");
+			return;
+		}
+
+		const items = Array.from(extensionToggle.known.values())
+			.sort((left, right) => left.path.localeCompare(right.path))
+			.map((extension) => ({
+				...extension,
+				enabled: !extensionToggle.disabled.has(extension.resolvedPath),
+			}));
+		this.showSelector((done) => {
+			const selector = new ExtensionToggleSelectorComponent(
+				items,
+				(enabled) => {
+					for (const resolvedPath of extensionToggle.known.keys()) {
+						if (enabled.has(resolvedPath)) extensionToggle.disabled.delete(resolvedPath);
+						else extensionToggle.disabled.add(resolvedPath);
+					}
+					done();
+					void this.handleReloadCommand();
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector };
+		});
 	}
 
 	private showSettingsSelector(): void {
