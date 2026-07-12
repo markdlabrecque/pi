@@ -585,6 +585,42 @@ Content`,
 	});
 
 	describe("override functions", () => {
+		it("should capture all extensions before filtering disabled paths", async () => {
+			let known = new Map<string, { path: string; resolvedPath: string }>();
+			const disabled = new Set<string>();
+			const loader = new DefaultResourceLoader({
+				cwd,
+				agentDir,
+				extensionFactories: [() => {}, () => {}],
+				extensionsOverride: (base) => {
+					known = new Map(
+						base.extensions.map((extension) => [
+							extension.resolvedPath,
+							{ path: extension.path, resolvedPath: extension.resolvedPath },
+						]),
+					);
+					return {
+						...base,
+						extensions: base.extensions.filter((extension) => !disabled.has(extension.resolvedPath)),
+					};
+				},
+			});
+			await loader.reload();
+
+			const allExtensions = loader.getExtensions().extensions;
+			expect(allExtensions).toHaveLength(2);
+			disabled.add(allExtensions[0].resolvedPath);
+			await loader.reload();
+
+			expect(loader.getExtensions().extensions.map((extension) => extension.resolvedPath)).toEqual([
+				allExtensions[1].resolvedPath,
+			]);
+			expect(Array.from(known.keys())).toEqual(
+				expect.arrayContaining(allExtensions.map((extension) => extension.resolvedPath)),
+			);
+			expect(known.size).toBe(2);
+		});
+
 		it("should apply skillsOverride", async () => {
 			const injectedSkill: Skill = {
 				name: "injected",
